@@ -15,8 +15,8 @@ services:
       - marksync-db-backups:/data/backups
 
   api:
-    build: ..
-    image: marksync/server:latest
+    image: ghcr.io/marksyncorg/marksync-server:latest
+    # To build from this checkout instead of pulling: replace `image` with `build: ..`
     container_name: marksync-api
     restart: unless-stopped
     depends_on:

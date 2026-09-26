@@ -56,13 +56,3 @@ jobs:
           pnpm install --frozen-lockfile
           XBS_CONTRACT_URL=http://127.0.0.1:8080 pnpm test:contract
 
-  docker:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: false
-          tags: marksync/server:ci

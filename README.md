@@ -50,9 +50,13 @@ docker compose -f docker-compose.mongo.yml up -d      # or MongoDB storage
 To run the image on its own:
 
 ```sh
-docker build -t marksync/server .
-docker run -d -p 8080:8080 -v marksync-data:/data marksync/server
+docker run -d -p 8080:8080 -v marksync-data:/data ghcr.io/marksyncorg/marksync-server:latest
 ```
+
+Images for `linux/amd64` and `linux/arm64` are published to GitHub Container Registry on
+every push to `main` (`latest`, `sha-<commit>`) and on `v*` tags (`1.2.3`, `1.2`). While the
+repository is private, run `docker login ghcr.io` first, using a personal access token with
+the `read:packages` scope. To build locally, use `docker build -t marksync/server .`.
 
 ## Configuration
 
