@@ -1,0 +1,10 @@
+{
+  "location": "",
+  "maxSyncSize": 1048576,
+  "server": {
+    "behindProxy": true
+  },
+  "status": {
+    "message": ""
+  }
+}

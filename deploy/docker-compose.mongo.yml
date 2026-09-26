@@ -1,0 +1,52 @@
+# MarkSync service on MongoDB. Uses the same database layout as xbrowsersync/api-docker,
+# so an existing xBrowserSync deployment's data can be served as-is.
+#   cd deploy && docker compose -f docker-compose.mongo.yml up -d
+services:
+  db:
+    image: mongo:7
+    container_name: marksync-db
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: ${DB_NAME}
+      MONGO_INITDB_ROOT_USERNAME: ${DB_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - marksync-db-data:/data/db
+      - marksync-db-backups:/data/backups
+
+  api:
+    build: ..
+    image: marksync/server:latest
+    container_name: marksync-api
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      XBROWSERSYNC_DB_USER: ${DB_USERNAME}
+      XBROWSERSYNC_DB_PWD: ${DB_PASSWORD}
+      MARKSYNC_SETTINGS_JSON: >-
+        {"server":{"host":"0.0.0.0","port":8080},
+         "db":{"type":"mongodb","host":"db","name":"${DB_NAME}","authSource":"admin"}}
+    volumes:
+      - ./settings.json:/app/config/settings.json:ro
+
+  reverse-proxy:
+    image: caddy:2-alpine
+    container_name: marksync-reverse-proxy
+    command: caddy reverse-proxy --from ${API_HOSTNAME} --to api:8080
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy-config:/config
+      - caddy-data:/data
+
+volumes:
+  marksync-db-data:
+  marksync-db-backups:
+  caddy-config:
+  caddy-data:

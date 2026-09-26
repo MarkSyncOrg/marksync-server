@@ -1,0 +1,31 @@
+# Production-ready MarkSync service: API (SQLite storage) behind Caddy with automatic HTTPS.
+#   cd deploy && docker compose up -d
+services:
+  api:
+    build: ..
+    image: marksync/server:latest
+    container_name: marksync-api
+    restart: unless-stopped
+    volumes:
+      - marksync-data:/data
+      - ./settings.json:/app/config/settings.json:ro
+
+  reverse-proxy:
+    image: caddy:2-alpine
+    container_name: marksync-reverse-proxy
+    command: caddy reverse-proxy --from ${API_HOSTNAME} --to api:8080
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy-config:/config
+      - caddy-data:/data
+
+volumes:
+  marksync-data:
+  caddy-config:
+  caddy-data:

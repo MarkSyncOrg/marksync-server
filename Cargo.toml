@@ -1,0 +1,44 @@
+[package]
+name = "marksync-server"
+version = "0.1.0"
+edition = "2024"
+description = "MarkSync sync server: a Rust rewrite of the xBrowserSync API, wire-compatible with its REST contract."
+license = "MIT"
+repository = "https://github.com/MarkSyncOrg/marksync-server"
+rust-version = "1.85"
+
+[features]
+default = ["sqlite", "mongodb", "tls"]
+sqlite = ["dep:sqlx"]
+mongodb = ["dep:mongodb"]
+tls = ["dep:axum-server"]
+
+[dependencies]
+anyhow = "1"
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "tower-log"] }
+axum-server = { version = "0.8", features = ["tls-rustls"], optional = true }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+http-body-util = "0.1"
+mongodb = { version = "3", optional = true }
+percent-encoding = "2"
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite"], optional = true }
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time", "io-util"] }
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+futures-util = { version = "0.3", default-features = false }
+tower = { version = "0.5", features = ["util"] }
+tempfile = "3"
+uuid = { version = "1", features = ["v4"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:7
+        ports: ["27017:27017"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Test (SQLite)
+        run: cargo test --locked
+      - name: Test (MongoDB)
+        run: cargo test --locked --test api
+        env:
+          MARKSYNC_TEST_MONGO_URI: mongodb://127.0.0.1:27017
+
+  contract:
+    # Runs the MarkSync core client's contract suite against a live server.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --locked
+      - name: Start server
+        run: |
+          MARKSYNC_SETTINGS_JSON='{"db":{"path":":memory:"},"dailyNewSyncsLimit":0}' \
+            ./target/debug/marksync-server &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8080/info && break; sleep 1; done
+      - uses: actions/checkout@v4
+        with:
+          repository: MarkSyncOrg/core
+          path: core
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Contract tests
+        working-directory: core
+        run: |
+          pnpm install --frozen-lockfile
+          XBS_CONTRACT_URL=http://127.0.0.1:8080 pnpm test:contract
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: marksync/server:ci

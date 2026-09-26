@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MarkSync API</title>
+<style>
+  :root { color-scheme: light dark; --fg: #1d2330; --muted: #5b6475; --bg: #f7f8fa; --card: #fff; --line: #e3e6ec; --accent: #2f6fde; }
+  @media (prefers-color-scheme: dark) { :root { --fg: #e6e9ef; --muted: #a0a8b8; --bg: #12151b; --card: #1a1f27; --line: #2a303b; --accent: #7aa7ff; } }
+  body { margin: 0; font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--fg); }
+  main { max-width: 760px; margin: 0 auto; padding: 48px 16px; }
+  h1 { margin: 0 0 4px; font-size: 1.8rem; }
+  p.lead { color: var(--muted); margin-top: 0; }
+  table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  code { font: 0.9em ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .verb { font-weight: 600; color: var(--accent); white-space: nowrap; }
+</style>
+</head>
+<body>
+<main>
+  <h1>MarkSync API</h1>
+  <p class="lead">Encrypted bookmark sync service, compatible with the xBrowserSync API. Bookmark data is encrypted by the client; this service only ever stores ciphertext.</p>
+  <table>
+    <thead><tr><th>Route</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><span class="verb">GET</span> <code>/info</code></td><td>Service status, version, location and maximum sync size.</td></tr>
+      <tr><td><span class="verb">POST</span> <code>/bookmarks</code></td><td>Create a new, empty sync. Body: <code>{ "version" }</code>.</td></tr>
+      <tr><td><span class="verb">GET</span> <code>/bookmarks/{id}</code></td><td>Get a sync's encrypted bookmarks, version and last-updated timestamp.</td></tr>
+      <tr><td><span class="verb">PUT</span> <code>/bookmarks/{id}</code></td><td>Update a sync. Body: <code>{ "bookmarks", "lastUpdated"?, "version"? }</code>. A stale <code>lastUpdated</code> is rejected with 409.</td></tr>
+      <tr><td><span class="verb">GET</span> <code>/bookmarks/{id}/lastUpdated</code></td><td>Get a sync's last-updated timestamp.</td></tr>
+      <tr><td><span class="verb">GET</span> <code>/bookmarks/{id}/version</code></td><td>Get a sync's data format version.</td></tr>
+    </tbody>
+  </table>
+</main>
+</body>
+</html>
