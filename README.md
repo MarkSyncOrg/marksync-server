@@ -47,6 +47,20 @@ docker compose up -d                                  # SQLite storage
 docker compose -f docker-compose.mongo.yml up -d      # or MongoDB storage
 ```
 
+To run it on a server without a reverse proxy, with automatic updates from GHCR through
+[Watchtower](https://github.com/nicholas-fedor/watchtower), use `deploy/standalone/`:
+
+```sh
+cd deploy/standalone
+echo "$GHCR_TOKEN" | docker login ghcr.io -u <github-user> --password-stdin   # token with read:packages
+docker compose up -d
+```
+
+In this setup Watchtower checks every container on the host every 5 minutes and cleans up
+old images. The MarkSync client accepts plain `http` only for `localhost`. On a public
+server, enable native HTTPS (`server.https` in `settings.json`, mounting the certificate),
+or put the service behind something that terminates TLS.
+
 To run the image on its own:
 
 ```sh
