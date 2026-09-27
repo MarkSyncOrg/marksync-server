@@ -3,7 +3,17 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - "deploy/**"
+      - ".github/workflows/docker.yml"
   pull_request:
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - "deploy/**"
+      - ".github/workflows/docker.yml"
 
 jobs:
   test:
