@@ -6,6 +6,7 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Instant;
 
 use axum::Router;
 use axum::body::{Body, Bytes};
@@ -19,11 +20,12 @@ use serde_json::Value;
 
 use crate::config::API_VERSION;
 use crate::error::ApiError;
-use crate::service::{Service, cast_string, now_millis, parse_sync_id};
+use crate::service::{Service, cast_string, now_millis, parse_sync_id, short_id};
 use crate::throttle::Throttle;
 use crate::version;
 
 const DOCS_HTML: &str = include_str!("docs.html");
+const SERVER_HEADER: &str = concat!("marksync-server/", env!("CARGO_PKG_VERSION"));
 
 pub struct App {
     pub service: Service,
@@ -52,6 +54,7 @@ enum Cors {
 }
 
 async fn handle(State(app): State<Arc<App>>, request: Request) -> Response {
+    let started = Instant::now();
     let method = request.method().clone();
     let path = request.uri().path().to_owned();
     let (cors, mut response) = match cors_policy(&app, request.headers()) {
@@ -77,8 +80,39 @@ async fn handle(State(app): State<Arc<App>>, request: Request) -> Response {
         }
         Cors::None => {}
     }
-    tracing::debug!(%method, %path, status = response.status().as_u16(), "request");
+    headers.insert(header::SERVER, HeaderValue::from_static(SERVER_HEADER));
+    log_request(&method, &path, response.status(), started);
     response
+}
+
+/// Access log. Sync IDs in the path are shortened (see `short_id`); `/info` and the favicon
+/// are logged at debug level because health checks poll them constantly.
+fn log_request(method: &Method, path: &str, status: StatusCode, started: Instant) {
+    let path = redact_path(path);
+    let ms = started.elapsed().as_secs_f64() * 1000.0;
+    let ms = format!("{ms:.1}");
+    let status = status.as_u16();
+    let quiet = status < 400 && {
+        let p = path.trim_end_matches('/').to_ascii_lowercase();
+        p.ends_with("/info") || p == "/favicon.ico"
+    };
+    if status >= 500 {
+        tracing::warn!(%method, %path, status, ms, "request");
+    } else if quiet {
+        tracing::debug!(%method, %path, status, ms, "request");
+    } else {
+        tracing::info!(%method, %path, status, ms, "request");
+    }
+}
+
+fn redact_path(path: &str) -> String {
+    path.split('/')
+        .map(|segment| {
+            let hex = segment.len() >= 32 && segment.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-');
+            if hex { format!("{}…", short_id(segment)) } else { segment.to_owned() }
+        })
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 fn cors_policy(app: &App, headers: &HeaderMap) -> Result<Cors, ApiError> {
@@ -89,7 +123,10 @@ fn cors_policy(app: &App, headers: &HeaderMap) -> Result<Cors, ApiError> {
     match headers.get(header::ORIGIN) {
         None => Ok(Cors::None),
         Some(origin) if allowed.iter().any(|a| a.as_bytes() == origin.as_bytes()) => Ok(Cors::Origin(origin.clone())),
-        Some(_) => Err(ApiError::OriginNotPermitted),
+        Some(origin) => {
+            tracing::warn!(origin = %String::from_utf8_lossy(origin.as_bytes()), "origin not in allowedOrigins");
+            Err(ApiError::OriginNotPermitted)
+        }
     }
 }
 
@@ -117,6 +154,13 @@ async fn dispatch(app: &App, request: Request) -> Result<Response, ApiError> {
         headers.insert("x-ratelimit-remaining", hit.remaining.into());
         headers.insert("x-ratelimit-reset", hit.reset_secs.into());
         if hit.exceeded {
+            if hit.first_exceeded {
+                tracing::warn!(
+                    client_ip = client_ip.as_deref().unwrap_or("-"),
+                    limit = hit.limit,
+                    "client throttled until the window resets"
+                );
+            }
             headers.insert(header::RETRY_AFTER, hit.retry_after_secs.into());
             let mut response = error_response(ApiError::RequestThrottled);
             response.headers_mut().extend(headers);
@@ -228,12 +272,15 @@ fn strip_base<'a>(path: &'a str, base: &str) -> Option<&'a str> {
 }
 
 fn select(version: &str, mappings: &[&str]) -> Result<usize, ApiError> {
-    version::select(version, mappings).ok_or(ApiError::UnsupportedVersion)
+    version::select(version, mappings).ok_or_else(|| {
+        tracing::info!(accept_version = version, "unsupported API version requested");
+        ApiError::UnsupportedVersion
+    })
 }
 
 fn sync_id(segment: &str) -> Result<String, ApiError> {
     let decoded = percent_encoding::percent_decode_str(segment).decode_utf8().map_err(|_| ApiError::InvalidSyncId)?;
-    parse_sync_id(&decoded)
+    parse_sync_id(&decoded).inspect_err(|_| tracing::debug!("invalid sync ID in request path"))
 }
 
 fn field<'a>(body: &'a Value, name: &str) -> &'a Value {
@@ -275,25 +322,37 @@ async fn read_json_body(headers: &HeaderMap, body: Body, limit: usize) -> Result
     }
     let declared =
         headers.get(header::CONTENT_LENGTH).and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok());
-    if declared.is_some_and(|len| len > limit as u64) {
+    if let Some(len) = declared.filter(|&len| len > limit as u64) {
+        tracing::warn!(bytes = len, limit, "request body exceeds maxSyncSize");
         return Err(ApiError::SyncDataLimitExceeded);
     }
     let bytes: Bytes = match Limited::new(body, limit).collect().await {
         Ok(collected) => collected.to_bytes(),
         Err(err) if err.downcast_ref::<LengthLimitError>().is_some() => {
+            tracing::warn!(limit, "request body exceeds maxSyncSize");
             return Err(ApiError::SyncDataLimitExceeded);
         }
-        Err(_) => return Err(ApiError::Unspecified),
+        Err(err) => {
+            tracing::warn!(error = %err, "unable to read request body");
+            return Err(ApiError::Unspecified);
+        }
     };
-    let text = std::str::from_utf8(&bytes).map_err(|_| ApiError::Unspecified)?;
+    let text = std::str::from_utf8(&bytes).map_err(|_| {
+        tracing::info!("request body is not valid UTF-8");
+        ApiError::Unspecified
+    })?;
     let trimmed = text.trim_start_matches([' ', '\t', '\n', '\r']);
     if trimmed.is_empty() {
         return Ok(Value::Object(Default::default()));
     }
     if !trimmed.starts_with(['{', '[']) {
+        tracing::info!("request body is not a JSON object or array");
         return Err(ApiError::Unspecified);
     }
-    serde_json::from_str(trimmed).map_err(|_| ApiError::Unspecified)
+    serde_json::from_str(trimmed).map_err(|err| {
+        tracing::info!(error = %err, "malformed JSON request body");
+        ApiError::Unspecified
+    })
 }
 
 fn json<T: Serialize>(value: &T) -> Response {
@@ -340,6 +399,17 @@ fn apply_security_headers(headers: &mut HeaderMap) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn redacts_sync_ids_in_paths() {
+        assert_eq!(redact_path("/bookmarks/52758cb942814faa9ab255208025ae65"), "/bookmarks/52758cb9…");
+        assert_eq!(
+            redact_path("/bookmarks/52758cb9-4281-4faa-9ab2-55208025ae65/lastUpdated"),
+            "/bookmarks/52758cb9…/lastUpdated"
+        );
+        assert_eq!(redact_path("/info"), "/info");
+        assert_eq!(redact_path("/bookmarks/short"), "/bookmarks/short");
+    }
 
     #[test]
     fn strips_base_path() {

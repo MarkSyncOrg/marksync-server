@@ -93,7 +93,7 @@ Objects are merged recursively and arrays are concatenated, like xBrowserSync's 
 | `db.uri` | `""` | Full MongoDB connection string. When set, it overrides `db.host`, `db.port`, the credentials and the other connection fields. |
 | `db.host`, `db.port`, `db.name`, `db.username`, `db.password`, `db.authSource`, `db.ssl`, `db.useSRV`, `db.connTimeout` | as in xBrowserSync | MongoDB connection. The credentials fall back to `XBROWSERSYNC_DB_USER` and `XBROWSERSYNC_DB_PWD`. |
 | `location` | `""` | ISO 3166-1 alpha-2 country code shown by `/info`. |
-| `log.stdout.enabled`, `log.stdout.level` | `true`, `info` | Console logging. |
+| `log.stdout.enabled`, `log.stdout.level`, `log.stdout.format` | `true`, `info`, `text` | Console logging. `format` is `text` or `json`. The `RUST_LOG` environment variable, for example `RUST_LOG=debug`, overrides `level`. |
 | `log.file.*` | disabled | Rotating JSON log file (`rotationPeriod` `1h` or `1d`, `rotatedFilesToKeep`). |
 | `maxSyncs` | `5242` | Total sync cap. At the cap, `/info` reports status `3`. `0` means no cap. |
 | `maxSyncSize` | `512000` | Maximum request body, in bytes. `/info` also reports it to clients. |
@@ -106,6 +106,28 @@ Objects are merged recursively and arrays are concatenated, like xBrowserSync's 
 | `status.message` | `""` | HTML message shown in `/info`. Script tags are stripped. |
 | `syncExpiryDays` | `21` | Syncs not accessed for this many days are deleted. `0` keeps syncs forever. |
 | `throttle.maxRequests`, `throttle.timeWindow` | `1000`, `300000` | Maximum requests per client IP in each window (in ms). `0` disables throttling. |
+
+## Logging
+
+At startup the server logs its effective settings (never credentials), the storage
+backend and the number of existing syncs. While running it logs:
+
+- one access line per request, with method, path, status and duration. Sync IDs are cut
+  to their first 8 characters, since a full ID is enough to overwrite a sync. `/info`
+  requests are logged at `debug`, so health checks do not flood the log;
+- sync events: created, updated (with payload size and version), conflicts and updates to
+  unknown syncs;
+- refusals, at `warn`: daily new-sync limit (with client IP), new syncs disabled or capped,
+  throttled clients (once per window), oversized bodies and origins not in the allow-list;
+- purges of expired syncs and logs.
+
+## Versions
+
+`GET /info` reports `"version": "1.1.13"`. This is the version of the xBrowserSync API
+contract the server implements, not the version of the server. Clients depend on it:
+MarkSync rejects services below `1.1.9`, and `Accept-Version` routing matches on major
+version `1`. The server's own version is in the `Server: marksync-server/<version>`
+response header, in `marksync-server --version`, and in the first log line.
 
 ## Migrating from xBrowserSync
 

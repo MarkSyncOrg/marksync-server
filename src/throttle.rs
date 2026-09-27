@@ -24,6 +24,8 @@ pub struct Hit {
     /// Seconds a throttled client should wait (the window length, rounded up).
     pub retry_after_secs: i64,
     pub exceeded: bool,
+    /// This is the first rejected request of the client in the current window.
+    pub first_exceeded: bool,
 }
 
 impl Throttle {
@@ -52,6 +54,7 @@ impl Throttle {
             reset_secs: ceil_div(state.reset_at, 1000),
             retry_after_secs: ceil_div(self.window_ms, 1000),
             exceeded: current > self.max_requests,
+            first_exceeded: current == self.max_requests + 1,
         }
     }
 }
@@ -76,7 +79,9 @@ mod tests {
         let second = throttle.hit("a", 10);
         assert!(!second.exceeded);
         assert_eq!(second.remaining, 0);
-        assert!(throttle.hit("a", 20).exceeded);
+        let third = throttle.hit("a", 20);
+        assert!(third.exceeded && third.first_exceeded);
+        assert!(!throttle.hit("a", 25).first_exceeded);
         assert!(!throttle.hit("b", 30).exceeded);
         let after_reset = throttle.hit("a", 1000);
         assert!(!after_reset.exceeded);

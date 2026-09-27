@@ -111,6 +111,7 @@ impl Service {
     ) -> Result<CreateResponse, ApiError> {
         self.check_available()?;
         if !self.is_accepting_new_syncs().await? {
+            tracing::warn!("new sync refused: service is not accepting new syncs (allowNewSyncs or maxSyncs)");
             return Err(ApiError::NewSyncsForbidden);
         }
         let limit = self.config.daily_new_syncs_limit;
@@ -118,6 +119,7 @@ impl Service {
         if limit > 0 {
             if let Some(ip) = client_ip {
                 if self.store.count_new_sync_logs(ip, now).await? >= limit {
+                    tracing::warn!(client_ip = ip, limit, "new sync refused: daily new syncs limit reached");
                     return Err(ApiError::NewSyncsLimitExceeded);
                 }
             }
@@ -138,7 +140,12 @@ impl Service {
                 None => tracing::info!("unable to determine client IP address"),
             }
         }
-        tracing::info!("new bookmarks sync created");
+        tracing::info!(
+            sync = short_id(&record.id),
+            version = record.version.as_deref().unwrap_or("-"),
+            legacy = record.bookmarks.is_some(),
+            "sync created"
+        );
 
         Ok(CreateResponse { id: record.id, last_updated: to_iso(record.last_updated), version: record.version })
     }
@@ -167,11 +174,15 @@ impl Service {
     pub async fn update_v1(&self, id: &str, bookmarks: &str) -> Result<LastUpdatedResponse, ApiError> {
         self.check_available()?;
         let Some(existing) = self.store.find(id).await? else {
+            tracing::info!(sync = short_id(id), "legacy update ignored: sync not found");
             return Ok(LastUpdatedResponse { last_updated: None });
         };
         let now = next_timestamp(existing.last_updated);
         let update = SyncUpdate { bookmarks, version: None, now, expected_last_updated: None };
         let updated = self.store.update(id, &update).await?;
+        if updated {
+            tracing::info!(sync = short_id(id), bytes = bookmarks.len(), legacy = true, "sync updated");
+        }
         Ok(LastUpdatedResponse { last_updated: updated.then(|| to_iso(now)) })
     }
 
@@ -185,9 +196,13 @@ impl Service {
         version: Option<&str>,
     ) -> Result<LastUpdatedResponse, ApiError> {
         self.check_available()?;
-        let existing = self.store.find(id).await?.ok_or(ApiError::SyncNotFound)?;
+        let Some(existing) = self.store.find(id).await? else {
+            tracing::info!(sync = short_id(id), "update rejected: sync not found");
+            return Err(ApiError::SyncNotFound);
+        };
         let supplied = is_truthy(last_updated);
         if supplied && last_updated.as_str() != Some(to_iso(existing.last_updated).as_str()) {
+            tracing::info!(sync = short_id(id), "update rejected: sync conflict (stale lastUpdated)");
             return Err(ApiError::SyncConflict);
         }
 
@@ -197,14 +212,20 @@ impl Service {
         let expected_last_updated = supplied.then_some(existing.last_updated);
         let update = SyncUpdate { bookmarks, version, now, expected_last_updated };
         if !self.store.update(id, &update).await? {
+            tracing::info!(sync = short_id(id), "update rejected: concurrent update");
             return Err(if supplied { ApiError::SyncConflict } else { ApiError::SyncNotFound });
         }
+        tracing::info!(sync = short_id(id), bytes = bookmarks.len(), version = version.unwrap_or("-"), "sync updated");
         Ok(LastUpdatedResponse { last_updated: Some(to_iso(now)) })
     }
 
     async fn touch(&self, id: &str) -> Result<SyncRecord, ApiError> {
         self.check_available()?;
-        self.store.touch(id, now_millis()).await?.ok_or(ApiError::SyncNotFound)
+        let record = self.store.touch(id, now_millis()).await?;
+        if record.is_none() {
+            tracing::debug!(sync = short_id(id), "sync not found");
+        }
+        record.ok_or(ApiError::SyncNotFound)
     }
 
     fn check_available(&self) -> Result<(), ApiError> {
@@ -240,6 +261,12 @@ pub fn parse_sync_id(raw: &str) -> Result<String, ApiError> {
     } else {
         Err(ApiError::InvalidSyncId)
     }
+}
+
+/// First 8 characters of a sync ID: enough to correlate log lines, not enough to use the
+/// sync (anyone holding a full ID can overwrite its data).
+pub fn short_id(id: &str) -> &str {
+    id.get(..8).unwrap_or(id)
 }
 
 pub fn now_millis() -> i64 {

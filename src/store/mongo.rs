@@ -30,6 +30,8 @@ impl MongoStore {
         let client = Client::with_options(options)?;
         let db = client.database(&config.name);
         db.run_command(doc! { "ping": 1 }).await.context("unable to connect to MongoDB")?;
+        let host = if config.uri.is_empty() { config.host.as_str() } else { "(from db.uri)" };
+        tracing::info!(host, database = config.name, "storage: MongoDB");
 
         let store = Self { bookmarks: db.collection("bookmarks"), logs: db.collection("newsynclogs") };
         store.ensure_indexes().await;

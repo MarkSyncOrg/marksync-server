@@ -63,6 +63,7 @@ impl SqliteStore {
         for statement in SCHEMA {
             sqlx::query(statement).execute(&pool).await.context("unable to initialise SQLite schema")?;
         }
+        tracing::info!(path, "storage: SQLite");
         Ok(Self { pool })
     }
 

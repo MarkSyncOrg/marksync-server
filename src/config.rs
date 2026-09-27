@@ -91,6 +91,8 @@ pub struct FileLogConfig {
 #[serde(rename_all = "camelCase")]
 pub struct StdoutLogConfig {
     pub enabled: bool,
+    /// `text` (human-readable) or `json` (one object per line).
+    pub format: String,
     pub level: String,
 }
 
@@ -193,6 +195,9 @@ impl Config {
         }
         if !self.server.relative_path.starts_with('/') {
             bail!("server.relativePath must start with '/'");
+        }
+        if !matches!(self.log.stdout.format.as_str(), "text" | "json") {
+            bail!("log.stdout.format must be \"text\" or \"json\"");
         }
         if self.server.https.enabled
             && (self.server.https.cert_path.is_empty() || self.server.https.key_path.is_empty())

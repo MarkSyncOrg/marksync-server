@@ -131,6 +131,8 @@ async fn info_reports_service_details() {
     assert_eq!(res.headers["cache-control"], "no-store, no-cache, must-revalidate, proxy-revalidate");
     assert_eq!(res.headers["access-control-allow-origin"], "*");
     assert_eq!(res.headers["x-ratelimit-limit"], "1000");
+    // The service's own version is in the Server header; `version` stays the API version.
+    assert_eq!(res.headers["server"], concat!("marksync-server/", env!("CARGO_PKG_VERSION")));
 }
 
 #[tokio::test]

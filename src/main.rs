@@ -9,9 +9,9 @@ use anyhow::{Context, Result, bail};
 use tracing::level_filters::LevelFilter;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_appender::rolling::{self, Rotation};
-use tracing_subscriber::Layer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{EnvFilter, Layer};
 
 use marksync_server::config::{API_VERSION, Config, LogConfig};
 use marksync_server::http::{self, App};
@@ -97,7 +97,12 @@ async fn serve(config: Config) -> Result<()> {
     let https = config.server.https.clone();
     let base_path = config.base_path();
 
+    log_startup(&config);
     let app = marksync_server::build_app(config).await?;
+    match app.service.store().count_syncs().await {
+        Ok(syncs) => tracing::info!(syncs, "storage ready"),
+        Err(err) => tracing::warn!(error = %format!("{err:#}"), "unable to count existing syncs"),
+    }
     spawn_purge_task(app.clone());
     let service = http::router(app).into_make_service_with_connect_info::<SocketAddr>();
 
@@ -145,6 +150,33 @@ async fn serve_tls(
     _: axum::extract::connect_info::IntoMakeServiceWithConnectInfo<axum::Router, SocketAddr>,
 ) -> Result<()> {
     bail!("server.https.enabled is set but this build has no TLS support (enable the `tls` feature)")
+}
+
+/// Logs the effective settings (never credentials) so the service state is clear from the
+/// first lines of the log.
+fn log_startup(config: &Config) {
+    tracing::info!(version = env!("CARGO_PKG_VERSION"), api_version = API_VERSION, "MarkSync server starting");
+    tracing::info!(
+        online = config.status.online,
+        allow_new_syncs = config.status.allow_new_syncs,
+        location = if config.location.is_empty() { "-" } else { config.location.as_str() },
+        "service status"
+    );
+    let throttle = if config.throttle.max_requests > 0 {
+        format!("{} req / {} s", config.throttle.max_requests, config.throttle.time_window / 1000)
+    } else {
+        "off".to_owned()
+    };
+    tracing::info!(
+        max_syncs = config.max_syncs,
+        max_sync_size = config.max_sync_size,
+        daily_new_syncs_limit = config.daily_new_syncs_limit,
+        sync_expiry_days = config.sync_expiry_days,
+        throttle,
+        "limits"
+    );
+    let origins = if config.allowed_origins.is_empty() { "*".to_owned() } else { config.allowed_origins.join(",") };
+    tracing::info!(allowed_origins = origins, behind_proxy = config.server.behind_proxy, "network");
 }
 
 fn resolve_addr(host: &str, port: u16) -> Result<SocketAddr> {
@@ -205,11 +237,20 @@ fn level(name: &str) -> LevelFilter {
 }
 
 fn init_logging(config: &LogConfig) -> Result<Option<WorkerGuard>> {
+    // `RUST_LOG` (e.g. `debug` or `marksync_server=trace`) overrides log.stdout.level.
+    let stdout_filter = || -> EnvFilter {
+        match std::env::var("RUST_LOG") {
+            Ok(directives) if !directives.trim().is_empty() => EnvFilter::new(directives),
+            _ => EnvFilter::default().add_directive(level(&config.stdout.level).into()),
+        }
+    };
     let stdout = config.stdout.enabled.then(|| {
-        tracing_subscriber::fmt::layer()
-            .with_target(false)
-            .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stdout()))
-            .with_filter(level(&config.stdout.level))
+        let layer = tracing_subscriber::fmt::layer().with_target(false);
+        if config.stdout.format == "json" {
+            layer.json().with_filter(stdout_filter()).boxed()
+        } else {
+            layer.with_ansi(std::io::IsTerminal::is_terminal(&std::io::stdout())).with_filter(stdout_filter()).boxed()
+        }
     });
 
     let mut guard = None;
