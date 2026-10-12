@@ -5,7 +5,7 @@ edition = "2024"
 description = "MarkSync sync server: a Rust rewrite of the xBrowserSync API, wire-compatible with its REST contract."
 license = "MIT"
 repository = "https://github.com/MarkSyncOrg/marksync-server"
-rust-version = "1.85"
+rust-version = "1.88"
 
 [features]
 default = ["sqlite", "mongodb", "tls"]

@@ -116,13 +116,12 @@ impl Service {
         }
         let limit = self.config.daily_new_syncs_limit;
         let now = now_millis();
-        if limit > 0 {
-            if let Some(ip) = client_ip {
-                if self.store.count_new_sync_logs(ip, now).await? >= limit {
-                    tracing::warn!(client_ip = ip, limit, "new sync refused: daily new syncs limit reached");
-                    return Err(ApiError::NewSyncsLimitExceeded);
-                }
-            }
+        if limit > 0
+            && let Some(ip) = client_ip
+            && self.store.count_new_sync_logs(ip, now).await? >= limit
+        {
+            tracing::warn!(client_ip = ip, limit, "new sync refused: daily new syncs limit reached");
+            return Err(ApiError::NewSyncsLimitExceeded);
         }
 
         let record = SyncRecord {
