@@ -177,15 +177,15 @@ impl Config {
 
     fn apply_credential_env(&mut self) {
         // Same fallbacks as the reference API: settings take precedence over the environment.
-        if self.db.username.is_empty() {
-            if let Ok(user) = std::env::var("XBROWSERSYNC_DB_USER") {
-                self.db.username = user;
-            }
+        if self.db.username.is_empty()
+            && let Ok(user) = std::env::var("XBROWSERSYNC_DB_USER")
+        {
+            self.db.username = user;
         }
-        if self.db.password.is_empty() {
-            if let Ok(pwd) = std::env::var("XBROWSERSYNC_DB_PWD") {
-                self.db.password = pwd;
-            }
+        if self.db.password.is_empty()
+            && let Ok(pwd) = std::env::var("XBROWSERSYNC_DB_PWD")
+        {
+            self.db.password = pwd;
         }
     }
 
