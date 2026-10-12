@@ -119,9 +119,7 @@ fn path_sync_id(path: &str) -> Option<&str> {
 
 fn redact_path(path: &str) -> String {
     path.split('/')
-        .map(|segment| {
-            if is_sync_id_segment(segment) { format!("{}…", short_id(segment)) } else { segment.to_owned() }
-        })
+        .map(|segment| if is_sync_id_segment(segment) { format!("{}…", short_id(segment)) } else { segment.to_owned() })
         .collect::<Vec<_>>()
         .join("/")
 }
