@@ -57,6 +57,7 @@ async fn handle(State(app): State<Arc<App>>, request: Request) -> Response {
     let started = Instant::now();
     let method = request.method().clone();
     let path = request.uri().path().to_owned();
+    let ip = client_ip(&app, &request);
     let (cors, mut response) = match cors_policy(&app, request.headers()) {
         Ok(cors) => {
             let response = if method == Method::OPTIONS {
@@ -81,13 +82,15 @@ async fn handle(State(app): State<Arc<App>>, request: Request) -> Response {
         Cors::None => {}
     }
     headers.insert(header::SERVER, HeaderValue::from_static(SERVER_HEADER));
-    log_request(&method, &path, response.status(), started);
+    log_request(&method, &path, ip.as_deref(), response.status(), started);
     response
 }
 
 /// Access log. Sync IDs in the path are shortened (see `short_id`); `/info` and the favicon
 /// are logged at debug level because health checks poll them constantly.
-fn log_request(method: &Method, path: &str, status: StatusCode, started: Instant) {
+fn log_request(method: &Method, path: &str, client_ip: Option<&str>, status: StatusCode, started: Instant) {
+    let sync = path_sync_id(path).map_or("-", short_id);
+    let client_ip = client_ip.unwrap_or("-");
     let path = redact_path(path);
     let ms = started.elapsed().as_secs_f64() * 1000.0;
     let ms = format!("{ms:.1}");
@@ -97,20 +100,26 @@ fn log_request(method: &Method, path: &str, status: StatusCode, started: Instant
         p.ends_with("/info") || p == "/favicon.ico"
     };
     if status >= 500 {
-        tracing::warn!(%method, %path, status, ms, "request");
+        tracing::warn!(%method, %path, sync, client_ip, status, ms, "request");
     } else if quiet {
-        tracing::debug!(%method, %path, status, ms, "request");
+        tracing::debug!(%method, %path, sync, client_ip, status, ms, "request");
     } else {
-        tracing::info!(%method, %path, status, ms, "request");
+        tracing::info!(%method, %path, sync, client_ip, status, ms, "request");
     }
+}
+
+fn is_sync_id_segment(segment: &str) -> bool {
+    segment.len() >= 32 && segment.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
+}
+
+/// The sync ID segment of a request path, if it has one.
+fn path_sync_id(path: &str) -> Option<&str> {
+    path.split('/').find(|segment| is_sync_id_segment(segment))
 }
 
 fn redact_path(path: &str) -> String {
     path.split('/')
-        .map(|segment| {
-            let hex = segment.len() >= 32 && segment.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-');
-            if hex { format!("{}…", short_id(segment)) } else { segment.to_owned() }
-        })
+        .map(|segment| if is_sync_id_segment(segment) { format!("{}…", short_id(segment)) } else { segment.to_owned() })
         .collect::<Vec<_>>()
         .join("/")
 }
@@ -409,6 +418,16 @@ mod tests {
         );
         assert_eq!(redact_path("/info"), "/info");
         assert_eq!(redact_path("/bookmarks/short"), "/bookmarks/short");
+    }
+
+    #[test]
+    fn finds_sync_id_in_paths() {
+        assert_eq!(
+            path_sync_id("/bookmarks/52758cb9-4281-4faa-9ab2-55208025ae65/lastUpdated"),
+            Some("52758cb9-4281-4faa-9ab2-55208025ae65")
+        );
+        assert_eq!(path_sync_id("/bookmarks"), None);
+        assert_eq!(path_sync_id("/info"), None);
     }
 
     #[test]
