@@ -16,7 +16,7 @@ tls = ["dep:axum-server"]
 [dependencies]
 anyhow = "1"
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "tower-log"] }
-axum-server = { version = "0.8", features = ["tls-rustls"], optional = true }
+axum-server = { version = "0.9", features = ["tls-rustls"], optional = true }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 http-body-util = "0.1"
 mongodb = { version = "3", optional = true }
